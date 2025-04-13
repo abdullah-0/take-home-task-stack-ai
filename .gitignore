@@ -1,0 +1,4 @@
+.idea
+app/core/.env
+spike.py
+server.py
