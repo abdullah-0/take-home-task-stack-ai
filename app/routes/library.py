@@ -1,56 +1,49 @@
-
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException, status, Path
+from fastapi import APIRouter, HTTPException, status, Path
 
 from app.core.v_db import VectorDB
-from app.schemas import Library, LibraryCreate, LibraryUpdate
-from app.utils import get_db
+from app.schemas.library import Library, LibraryCreate, LibraryUpdate
 
 router = APIRouter()
-
-
+db = VectorDB()
 
 
 @router.post("/", response_model=Library, status_code=status.HTTP_201_CREATED)
-def create_library(library: LibraryCreate, db: VectorDB = Depends(get_db)):
-    library_id = db.create_library(library.name, library.metadata)
-    return db.get_library(library_id)
+def create_library(library: LibraryCreate):
+    library_id = db.create_library(name=library.name, metadata=library.metadata)
+    created = db.get_library(library_id)
+    if not created:
+        raise HTTPException(status_code=500, detail="Library creation failed")
+    return created
 
 
 @router.get("/", response_model=List[Library])
-def list_libraries(db: VectorDB = Depends(get_db)):
-    return db.get_all_libraries()
+def list_libraries():
+    return db.get_all_libraries()  # already includes documents & chunks
 
 
 @router.get("/{library_id}", response_model=Library)
-def get_library(
-        library_id: str = Path(..., description="The ID of the library"),
-        db: VectorDB = Depends(get_db)
-):
-    library = db.get_library(library_id)
-    if not library:
+def get_library(library_id: str = Path(..., description="The ID of the library")):
+    lib = db.get_library(library_id)
+    if not lib:
         raise HTTPException(status_code=404, detail="Library not found")
-    return library
+    return lib  # already enriched
 
 
 @router.put("/{library_id}", response_model=Library)
-def update_library(
-        library_id: str,
-        library_update: LibraryUpdate,
-        db: VectorDB = Depends(get_db)
-):
+def update_library(library_id: str, library_update: LibraryUpdate):
     if not db.library_exists(library_id):
         raise HTTPException(status_code=404, detail="Library not found")
-
-    db.update_library(library_id, library_update.name, library_update.metadata)
-    return db.get_library(library_id)
+    db.update_library(
+        library_id, name=library_update.name, metadata=library_update.metadata
+    )
+    updated = db.get_library(library_id)
+    return updated
 
 
 @router.delete("/{library_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_library(
-        library_id: str,
-        db: VectorDB = Depends(get_db)
-):
-    if not db.delete_library(library_id):
+def delete_library(library_id: str):
+    deleted = db.delete_library(library_id)
+    if not deleted:
         raise HTTPException(status_code=404, detail="Library not found")

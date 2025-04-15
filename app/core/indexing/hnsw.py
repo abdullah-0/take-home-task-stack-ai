@@ -14,18 +14,18 @@ class HNSWIndex:
         self.entry_point = None
 
     def _search_layer(self, q: np.ndarray, ep: dict, ef: int, layer: int):
-        candidates = [(-np.linalg.norm(q - ep['vector']), ep)]
-        visited = set([ep['id']])
+        candidates = [(-np.linalg.norm(q - ep["vector"]), ep)]
+        visited = set([ep["id"]])
         heap = []
 
         while candidates:
             dist, node = heapq.heappop(candidates)
             heapq.heappush(heap, (-dist, node))
 
-            for neighbor in node['neighbors'].get(layer, []):
-                if neighbor['id'] not in visited:
-                    visited.add(neighbor['id'])
-                    dist = -np.linalg.norm(q - neighbor['vector'])
+            for neighbor in node["neighbors"].get(layer, []):
+                if neighbor["id"] not in visited:
+                    visited.add(neighbor["id"])
+                    dist = -np.linalg.norm(q - neighbor["vector"])
                     heapq.heappush(candidates, (dist, neighbor))
 
         return [item[1] for item in heapq.nlargest(ef, heap)]

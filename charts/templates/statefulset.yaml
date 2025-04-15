@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: vectordb
+spec:
+  serviceName: vectordb
+  replicas: 3
+  selector:
+    matchLabels:
+      app: vectordb
+  template:
+    spec:
+      containers:
+      - name: vectordb
+        image: vectordb:latest
+        env:
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: REPLICA_SET
+          value: "vectordb-0,vectordb-1,vectordb-2"

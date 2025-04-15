@@ -2,3 +2,4 @@
 app/core/.env
 spike.py
 server.py
+data/

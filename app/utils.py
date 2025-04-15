@@ -7,6 +7,7 @@ from app.core.v_db import VectorDB
 def generate_id() -> str:
     return f"lib_{uuid4().hex}"
 
+
 def get_current_time() -> datetime:
     return datetime.now()
 
