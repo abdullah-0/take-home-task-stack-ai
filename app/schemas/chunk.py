@@ -1,12 +1,11 @@
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional
 
 from pydantic import BaseModel
 
 
 class ChunkBase(BaseModel):
     content: str
-    embedding: List[float]
     metadata: Optional[dict] = None
 
 
@@ -23,3 +22,15 @@ class Chunk(ChunkBase):
     document_id: str
     library_id: str
     created_at: datetime
+
+
+class SearchRequestSchema(BaseModel):
+    library_id: str
+    query: str
+    k: int = 5
+
+class SearchResultChunk(BaseModel):
+    chunk: Chunk
+    score: float
+
+

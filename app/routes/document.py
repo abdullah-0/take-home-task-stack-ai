@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, status, Path
 from app.core.v_db import VectorDB
 from app.schemas.document import Document, DocumentCreate, DocumentUpdate
 
-router = APIRouter()
+router = APIRouter(prefix="/v1/documnet",tags=["Document"])
 db = VectorDB()
 
 

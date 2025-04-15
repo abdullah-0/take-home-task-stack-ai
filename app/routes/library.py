@@ -5,7 +5,7 @@ from fastapi import APIRouter, HTTPException, status, Path
 from app.core.v_db import VectorDB
 from app.schemas.library import Library, LibraryCreate, LibraryUpdate
 
-router = APIRouter()
+router = APIRouter(prefix="/v1/library",tags=["Library"])
 db = VectorDB()
 
 

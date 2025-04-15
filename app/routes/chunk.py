@@ -3,26 +3,24 @@ from typing import List
 from fastapi import APIRouter, HTTPException, status, Path
 
 from app.core.v_db import VectorDB
-from app.schemas.chunk import Chunk, ChunkCreate, ChunkUpdate
+from app.schemas.chunk import Chunk, ChunkCreate, ChunkUpdate, SearchResultChunk, SearchRequestSchema
+from app.services.cohere_embedding import get_embedding
 
-router = APIRouter()
+router = APIRouter(prefix="/v1/chunk",tags=["Chunk"])
 db = VectorDB()
 
 
 @router.post("/", response_model=Chunk, status_code=status.HTTP_201_CREATED)
-def create_chunk(chunk: ChunkCreate):
-    if not db.document_exists(chunk.document_id):
-        raise HTTPException(status_code=404, detail="Document not found")
-    chunk_id = db.create_chunk(
-        document_id=chunk.document_id,
-        content=chunk.content,
-        embedding=chunk.embedding,
-        metadata=chunk.metadata,
-    )
-    created = db.get_chunk(chunk_id)
-    if not created:
-        raise HTTPException(status_code=500, detail="Chunk creation failed")
-    return created
+def create_chunk(chunk_in: ChunkCreate):
+    try:
+        chunk_id = db.create_chunk(
+            document_id=chunk_in.document_id,
+            content=chunk_in.content,
+            metadata=chunk_in.metadata,
+        )
+        return db.get_chunk(chunk_id)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
 
 
 @router.get("/", response_model=List[Chunk])
@@ -55,3 +53,22 @@ def update_chunk(chunk_id: str, chunk_update: ChunkUpdate):
 def delete_chunk(chunk_id: str):
     if not db.delete_chunk(chunk_id):
         raise HTTPException(status_code=404, detail="Chunk not found")
+
+
+
+@router.post("/search", response_model=List[SearchResultChunk])
+def search_chunks(request: SearchRequestSchema, vector_db=None):
+    # Embed the query using Cohere
+    try:
+        query_embedding = get_embedding(request.query)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Cohere embedding failed: {str(e)}")
+
+    # Search in VectorDB
+    results = vector_db.search_chunks(
+        library_id=request.library_id,
+        query_embedding=query_embedding,
+        k=request.k
+    )
+
+    return [{"chunk": chunk, "score": score} for chunk, score in results]

@@ -1,9 +1,13 @@
 import datetime
 import json
+from heapq import nlargest
 from pathlib import Path
 from threading import RLock
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from uuid import uuid4
+
+from app.services.cohere_embedding import get_embedding
+from app.utils import cosine_similarity, GridIndex, InvertedIndex
 
 
 class VectorDB:
@@ -15,6 +19,9 @@ class VectorDB:
         self.documents: Dict[str, dict] = {}
         self.chunks: Dict[str, dict] = {}
         self.lock = RLock()
+
+        self.grid_index = GridIndex(bin_size=0.5)
+        self.inverted_index = InvertedIndex()
 
         self.load_from_disk()
 
@@ -56,7 +63,6 @@ class VectorDB:
         if not library:
             return None
 
-        # Deep copy to avoid mutating original
         library_copy = library.copy()
         documents = []
         for doc_id, doc in self.documents.items():
@@ -85,10 +91,8 @@ class VectorDB:
     def delete_library(self, library_id: str) -> bool:
         with self.lock:
             if library_id in self.libraries:
-                # Also delete related documents and chunks
                 doc_ids = [
-                    doc_id
-                    for doc_id, doc in self.documents.items()
+                    doc_id for doc_id, doc in self.documents.items()
                     if doc["library_id"] == library_id
                 ]
                 for doc_id in doc_ids:
@@ -102,9 +106,7 @@ class VectorDB:
         return library_id in self.libraries
 
     # === DOCUMENT ===
-    def create_document(
-        self, library_id: str, title: str, metadata: dict = None
-    ) -> str:
+    def create_document(self, library_id: str, title: str, metadata: dict = None) -> str:
         with self.lock:
             document_id = f"doc_{uuid4().hex}"
             self.documents[document_id] = {
@@ -130,6 +132,10 @@ class VectorDB:
         ]
         return document_copy
 
+    def get_all_documents(self) -> List[dict]:
+        with self.lock:
+            return list(self.documents.values())
+
     def update_document(self, document_id: str, title: str, metadata: dict):
         with self.lock:
             if document_id in self.documents:
@@ -140,14 +146,12 @@ class VectorDB:
     def delete_document(self, document_id: str) -> bool:
         with self.lock:
             if document_id in self.documents:
-                # Also delete associated chunks
                 chunk_ids = [
-                    cid
-                    for cid, c in self.chunks.items()
+                    cid for cid, c in self.chunks.items()
                     if c["document_id"] == document_id
                 ]
                 for cid in chunk_ids:
-                    del self.chunks[cid]
+                    self.delete_chunk(cid)
                 del self.documents[document_id]
                 self.save_to_disk()
                 return True
@@ -157,23 +161,33 @@ class VectorDB:
         return document_id in self.documents
 
     # === CHUNK ===
-    def create_chunk(
-        self,
-        document_id: str,
-        content: str,
-        embedding: List[float],
-        metadata: dict = None,
-    ) -> str:
+    def create_chunk(self, document_id: str, content: str, metadata: dict = None) -> str:
         with self.lock:
+            document = self.documents.get(document_id)
+            if not document:
+                raise ValueError("Document not found")
+
+            library_id = document["library_id"]
+            embedding = get_embedding(content)
+
             chunk_id = f"chk_{uuid4().hex}"
-            self.chunks[chunk_id] = {
+            chunk = {
                 "id": chunk_id,
                 "document_id": document_id,
+                "library_id": library_id,
                 "content": content,
                 "embedding": embedding,
                 "metadata": metadata or {},
                 "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
             }
+
+            self.chunks[chunk_id] = chunk
+
+            for token in content.lower().split():
+                self.inverted_index.add(token, chunk_id)
+
+            self.grid_index.add(embedding, chunk_id)
+
             self.save_to_disk()
             return chunk_id
 
@@ -189,9 +203,7 @@ class VectorDB:
             chunk_copy["library_id"] = doc["library_id"]
         return chunk_copy
 
-    def update_chunk(
-        self, chunk_id: str, content: str, embedding: List[float], metadata: dict
-    ):
+    def update_chunk(self, chunk_id: str, content: str, embedding: List[float], metadata: dict):
         with self.lock:
             if chunk_id in self.chunks:
                 self.chunks[chunk_id]["content"] = content
@@ -210,6 +222,25 @@ class VectorDB:
     def chunk_exists(self, chunk_id: str) -> bool:
         return chunk_id in self.chunks
 
-    def get_chunk_embedding(self, chunk_id: str) -> Optional[List[float]]:
-        chunk = self.chunks.get(chunk_id)
-        return chunk.get("embedding") if chunk else None
+    def search_chunks(self, library_id: str, query_embedding: List[float], k: int = 5) -> List[Tuple[dict, float]]:
+        results = []
+
+        bin_candidates = self.grid_index.search(query_embedding)
+        chunk_ids_in_library = {
+            cid for cid, _ in bin_candidates
+            if self.chunks[cid]["library_id"] == library_id
+        }
+
+        for chunk_id in chunk_ids_in_library:
+            chunk = self.chunks[chunk_id]
+            sim = cosine_similarity(query_embedding, chunk["embedding"])
+            results.append((chunk, sim))
+
+        if len(results) < k:
+            for chunk in self.chunks.values():
+                if chunk["id"] not in chunk_ids_in_library and chunk["library_id"] == library_id:
+                    sim = cosine_similarity(query_embedding, chunk["embedding"])
+                    results.append((chunk, sim))
+
+        top_k = nlargest(k, results, key=lambda x: x[1])
+        return top_k
